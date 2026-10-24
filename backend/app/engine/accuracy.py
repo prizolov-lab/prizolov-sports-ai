@@ -59,18 +59,28 @@ def _actual_selection(home_score: int, away_score: int) -> str:
 
 
 async def _fetch_scores(client: httpx.AsyncClient) -> list[dict[str, Any]]:
-    response = await client.get(
-        f"/v4/sports/{settings.odds_api_sport_key}/scores",
-        params={
-            "apiKey": settings.odds_api_key,
-            "daysFrom": 3,
-        },
-    )
-    response.raise_for_status()
-    data = response.json()
-    if not isinstance(data, list):
-        return []
-    return data
+    """Результаты по всем настроенным лигам. Ошибка одной лиги не мешает остальным."""
+    items: list[dict[str, Any]] = []
+    for sport_key in settings.sport_keys:
+        try:
+            response = await client.get(
+                f"/v4/sports/{sport_key}/scores",
+                params={
+                    "apiKey": settings.odds_api_key,
+                    "daysFrom": 3,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            logger.exception("The Odds API scores: лига %s не загружена", sport_key)
+            continue
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    item.setdefault("sport_key", sport_key)
+                    items.append(item)
+    return items
 
 
 def _parse_scores(item: dict[str, Any]) -> tuple[int, int] | None:
@@ -118,6 +128,7 @@ async def reconcile_finished_events(db: Session) -> int:
 
     scores_by_teams: dict[tuple[str, str], tuple[int, int]] = {}
     score_ids: dict[tuple[str, str], str] = {}
+    score_sports: dict[tuple[str, str], str] = {}
     for item in raw_scores:
         parsed = _parse_scores(item)
         if parsed is None:
@@ -125,6 +136,7 @@ async def reconcile_finished_events(db: Session) -> int:
         key = (str(item.get("home_team", "")).strip(), str(item.get("away_team", "")).strip())
         scores_by_teams[key] = parsed
         score_ids[key] = str(item.get("id", ""))
+        score_sports[key] = str(item.get("sport_key", ""))
 
     reconciled = 0
     q4_confirmed = q4_events = 0
@@ -173,7 +185,7 @@ async def reconcile_finished_events(db: Session) -> int:
 
         # Agenomics Q4. Ссылка указывает на запись /scores, по которой
         # установлен исход; ошибка agenomics не мешает сверке.
-        reference = (f"the-odds-api:scores:{settings.odds_api_sport_key}:{score_ids.get(key) or ''}:"
+        reference = (f"the-odds-api:scores:{score_sports.get(key) or settings.sport_keys[0]}:{score_ids.get(key) or ''}:"
                      f"{event.home_team} {home_score}-{away_score} {event.away_team}")
         try:
             confirmed = confirm_finished_event(event.id, actual, reference)

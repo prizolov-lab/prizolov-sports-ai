@@ -22,7 +22,8 @@
 dashboard.the-odds-api.com.
 
 ВАЖНО ПРО ОХВАТ: в отличие от Forebet/Predictz (весь футбол одним фидом),
-здесь один запрос = одна лига (`ODDS_API_SPORT_KEY`, например "soccer_epl").
+здесь один запрос = одна лига (`ODDS_API_SPORT_KEYS`, список через запятую,
+или `ODDS_API_SPORT_KEY` для одной лиги, например "soccer_epl").
 Полный список доступных лиг — GET /v4/sports с твоим ключом.
 """
 
@@ -50,41 +51,55 @@ class TheOddsApiParser(BaseSourceParser):
         if not settings.odds_api_key:
             raise RuntimeError("ODDS_API_KEY не задан в .env")
 
+        events: list[dict[str, Any]] = []
+        failures = 0
         async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as client:
-            response = await client.get(
-                f"/v4/sports/{settings.odds_api_sport_key}/odds",
-                params={
-                    "apiKey": settings.odds_api_key,
-                    "regions": settings.odds_api_region,
-                    "markets": "h2h",
-                    "oddsFormat": "decimal",
-                },
+            for sport_key in settings.sport_keys:
+                try:
+                    events.extend(await self._fetch_league(client, sport_key))
+                except Exception:
+                    # Одна лига не должна ронять остальные (квота, нет матчей, сеть).
+                    failures += 1
+                    logger.exception("The Odds API: лига %s не загружена", sport_key)
+        if failures and failures == len(settings.sport_keys):
+            raise RuntimeError("The Odds API: не загружена ни одна лига")
+        return events
+
+    async def _fetch_league(self, client: httpx.AsyncClient, sport_key: str) -> list[dict[str, Any]]:
+        response = await client.get(
+            f"/v4/sports/{sport_key}/odds",
+            params={
+                "apiKey": settings.odds_api_key,
+                "regions": settings.odds_api_region,
+                "markets": "h2h",
+                "oddsFormat": "decimal",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        if not isinstance(data, list):
+            raise RuntimeError(f"Неожиданный ответ The Odds API: {data}")
+
+        events: list[dict[str, Any]] = []
+        for item in data:
+            home_team = str(item.get("home_team", "")).strip()
+            away_team = str(item.get("away_team", "")).strip()
+            if not home_team or not away_team:
+                continue
+
+            markets = self._extract_consensus_market(item, home_team, away_team)
+            events.append(
+                {
+                    "source_id": self.source_id,
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "league": str(item.get("sport_title", "")).strip(),
+                    "kickoff": item.get("commence_time"),
+                    "markets": markets,
+                }
             )
-            response.raise_for_status()
-            data = response.json()
-
-            if not isinstance(data, list):
-                raise RuntimeError(f"Неожиданный ответ The Odds API: {data}")
-
-            events: list[dict[str, Any]] = []
-            for item in data:
-                home_team = str(item.get("home_team", "")).strip()
-                away_team = str(item.get("away_team", "")).strip()
-                if not home_team or not away_team:
-                    continue
-
-                markets = self._extract_consensus_market(item, home_team, away_team)
-                events.append(
-                    {
-                        "source_id": self.source_id,
-                        "home_team": home_team,
-                        "away_team": away_team,
-                        "league": str(item.get("sport_title", "")).strip(),
-                        "kickoff": item.get("commence_time"),
-                        "markets": markets,
-                    }
-                )
-            return events
+        return events
 
     @staticmethod
     def _devig_bookmaker(

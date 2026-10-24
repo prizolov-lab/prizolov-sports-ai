@@ -60,10 +60,25 @@ class Settings(BaseSettings):
     # --- The Odds API (the-odds-api.com) ---
     odds_api_key: str = ""
     odds_api_sport_key: str = "soccer_epl"  # см. GET /v4/sports для полного списка лиг
+    # Несколько лиг через запятую, например "soccer_epl,soccer_spain_la_liga,
+    # soccer_italy_serie_a,soccer_germany_bundesliga,soccer_france_ligue_one".
+    # Пусто: используется odds_api_sport_key. Каждая лига тратит свои кредиты
+    # The Odds API на каждый запрос (коэффициенты и результаты).
+    odds_api_sport_keys: str = ""
     odds_api_region: str = "eu"
     # ВНИМАНИЕ: бесплатный тариф The Odds API — маленькая квота (порядка сотен
     # запросов/мес). При PARSER_INTERVAL_MINUTES=30 квота сгорит за 1-2 дня.
     # Проверь актуальный расход на dashboard.the-odds-api.com после первых прогонов.
+
+    @cached_property
+    def sport_keys(self) -> list[str]:
+        raw = self.odds_api_sport_keys.strip() or self.odds_api_sport_key
+        keys: list[str] = []
+        for item in raw.split(","):
+            key = item.strip()
+            if key and key not in keys:
+                keys.append(key)
+        return keys
 
     @cached_property
     def sqlalchemy_database_url(self) -> str:
