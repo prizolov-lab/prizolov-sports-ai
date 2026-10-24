@@ -23,4 +23,4 @@ alembic==1.13.1
 # Закреплённый тег, а не ветка main: любое слияние в main agenomics иначе
 # попадало бы в прод при следующей сборке без проверки. 0.9.6 нужен для Q4
 # (agenomics.record_external_outcome, engine/agenomics_evidence.py).
-agenomics @ git+https://github.com/GIBDD-DPS/agenomics.git@v0.9.6
+agenomics==0.9.6

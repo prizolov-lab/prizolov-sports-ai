@@ -34,7 +34,8 @@ from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
-from app.agenomics_integration import FORECAST_AGENT
+from app.agenomics_integration import FORECAST_AGENT, FORECAST_AGENTS
+from app.engine.strategy_agents import BY_ID, probs_from_factors
 from app.engine.agenomics_evidence import confirm_finished_event
 from app.core.config import settings
 from app.models.accuracy_log import AccuracyLog
@@ -179,6 +180,16 @@ async def reconcile_finished_events(db: Session) -> int:
                 predicted_proba=prediction.probability,
                 actual_outcome=1 if correct else 0,
             )
+
+            # Агенты других стратегий оцениваются по тем же вероятностям матча.
+            for agent_id, tracked in FORECAST_AGENTS.items():
+                if tracked is FORECAST_AGENT:
+                    continue
+                pick, pick_proba = BY_ID[agent_id].pick(probs_from_factors(factors))
+                tracked.record_outcome(
+                    predicted_proba=pick_proba,
+                    actual_outcome=1 if pick == actual else 0,
+                )
 
         event.status = "finished"
         reconciled += 1

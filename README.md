@@ -53,7 +53,7 @@ python scripts/sync_copyright.py   # синхронизация v14.x в headers
 - [cloud.amvera.ru](https://cloud.amvera.ru) → проект **`prizolov-sports`** (тип **Приложение**)
 
 ### 2. Подключить GitHub
-- Привязать репозиторий `GIBDD-DPS/prizolov-sports-ai`
+- Привязать репозиторий `prizolov-lab/prizolov-sports-ai`
 - Amvera найдёт **`amvera.yaml`** и **`Dockerfile`** в **корне** репозитория
 
 ### 3. Переменные окружения (Secrets)

@@ -13,7 +13,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # git нужен, чтобы pip мог поставить зависимость agenomics по git-ссылке
-# (agenomics @ git+https://github.com/GIBDD-DPS/agenomics.git в requirements.txt).
+# (agenomics @ git+https://github.com/prizolov-lab/agenomics.git в requirements.txt).
 # python:3.11-slim не содержит git по умолчанию — без этого шага сборка падает
 # с "ERROR: Cannot find command 'git'".
 RUN apt-get update \

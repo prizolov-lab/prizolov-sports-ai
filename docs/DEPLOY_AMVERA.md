@@ -45,7 +45,7 @@ Amvera **сама** создаёт окружение из `requirements.txt`.
 
 ## Рекомендуется: GitHub (без venv)
 
-1. Репозиторий: `GIBDD-DPS/prizolov-sports-ai`, ветка `main`
+1. Репозиторий: `prizolov-lab/prizolov-sports-ai`, ветка `main`
 2. venv уже в `.gitignore` — в GitHub его нет
 3. Окружение: **Docker** (`amvera.yaml` + `Dockerfile` в корне)
 
@@ -69,7 +69,7 @@ PRIZOLOV SPORTS AI v14.14+
 | Источник | ручная загрузка старого ZIP | GitHub `main` |
 
 **Что сделать:**
-1. Привязать GitHub `GIBDD-DPS/prizolov-sports-ai`, ветка `main`
+1. Привязать GitHub `prizolov-lab/prizolov-sports-ai`, ветка `main`
 2. Или загрузить свежий ZIP: `.\scripts\make_amvera_zip.ps1`
 3. Заморозить проект 20 сек (очистить venv в Artifacts)
 4. Пересобрать

@@ -9,7 +9,11 @@ Organization: Prizolov Market / Prizolov Lab
 
 ## [Не выпущено]
 
+### Changed
+- `requirements.txt`: `agenomics==0.9.6` с PyPI вместо ссылки на git; ссылки на репозиторий с `GIBDD-DPS` на `prizolov-lab`.
+
 ### Added
+- Пять прогнозирующих агентов с разными правилами выбора исхода (`engine/strategy_agents.py`): consensus (прежний), no-draw, home-bias, draw-hunter и контрарный контрольный underdog. Каждый замораживается и подтверждается в Agenomics отдельно (Q4), у каждого своя история и свой Trust Score на момент заморозки. Агенты оцениваются на одних и тех же матчах, поэтому строк Q4 больше, а независимых матчей нет: `/api/v1/admin/agenomics` показывает `agents` с `independent_confirmed_events`.
 - `ODDS_API_SPORT_KEYS`: несколько лиг через запятую (парсинг коэффициентов и сверка результатов). Пусто: прежнее поведение с `ODDS_API_SPORT_KEY`. Ускоряет набор внешних исходов Q4 для Agenomics: больше матчей в неделю. Сбой одной лиги не останавливает остальные.
 
 ## [14.45] - 2026-10-10

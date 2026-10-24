@@ -3,7 +3,7 @@ agenomics_integration.py
 =========================
 
 Интеграционный слой между PRIZOLOV SPORTS AI и Agenomics
-(https://github.com/GIBDD-DPS/agenomics).
+(https://github.com/prizolov-lab/agenomics).
 """
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ class TrackedAgent:
         if AgentGenome is None:
             raise RuntimeError(
                 "Пакет agenomics не установлен. "
-                "pip install -e git+https://github.com/GIBDD-DPS/agenomics.git#egg=agenomics"
+                "pip install -e git+https://github.com/prizolov-lab/agenomics.git#egg=agenomics"
             )
         return AgentGenome(
             id=self.agent_id,
@@ -162,6 +162,22 @@ FORECAST_AGENT = TrackedAgent(
     autonomy="advisory",
 )
 
+# Агенты других стратегий: тот же прогноз матча, другое правило выбора
+# (engine/strategy_agents.py). Основной остаётся FORECAST_AGENT.
+def _build_strategy_agents() -> dict:
+    from app.engine.strategy_agents import STRATEGY_AGENTS
+
+    agents = {FORECAST_AGENT.agent_id: FORECAST_AGENT}
+    for spec in STRATEGY_AGENTS:
+        if spec.agent_id not in agents:
+            agents[spec.agent_id] = TrackedAgent(
+                agent_id=spec.agent_id, domain="sports-forecasting", autonomy="advisory"
+            )
+    return agents
+
+
+FORECAST_AGENTS = _build_strategy_agents()
+
 router = APIRouter(tags=["agenomics"])
 
 
@@ -181,7 +197,7 @@ def get_trust_scores(x_api_secret: str = Header(default=None)):
         )
 
     results = {}
-    for agent in (PARSER_AGENT, FORECAST_AGENT):
+    for agent in (PARSER_AGENT, *FORECAST_AGENTS.values()):
         try:
             r = agent.score()
             results[agent.agent_id] = {

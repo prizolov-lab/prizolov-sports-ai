@@ -101,16 +101,18 @@ def parse_task_version(value: Optional[str]) -> Optional[dict]:
             "prediction": int(info["prediction"]), "selection": info["selection"], "p": float(info["p"])}
 
 
-def configuration_hash(source_weights: dict, min_sources: int) -> str:
+def configuration_hash(source_weights: dict, min_sources: int, strategy: str = "consensus") -> str:
     """Конфигурация прогнозирующего агента: движок, веса источников, кворум.
     Меняется только при смене конфигурации, а не с каждой метрикой."""
     payload = {"engine": ENGINE_VERSION, "weights": source_weights, "min_sources": min_sources}
+    if strategy != "consensus":  # хеш основного агента не меняется
+        payload["strategy"] = strategy
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def _frozen_keys(store) -> set:
+def _frozen_keys(store, agent_id: str = AGENT_ID) -> set:
     keys = set()
-    for p in store.get_predictions(AGENT_ID):
+    for p in store.get_predictions(agent_id):
         info = parse_task_version(p.snapshot.get("task_version"))
         if info:
             keys.add((info["event"], info["market"], info["prediction"]))
@@ -118,19 +120,19 @@ def _frozen_keys(store) -> set:
 
 
 def freeze_forecasts(store, forecasts: Iterable[dict], trust_score: float, trust_label: str,
-                     config_hash: str, now: datetime) -> int:
+                     config_hash: str, now: datetime, agent_id: str = AGENT_ID) -> int:
     """Замораживает прогнозы, ещё не замороженные. forecasts: словари с
     event_id, market_id, prediction_id, selection, probability. Одно
     наблюдение на прогноз: у каждого матча свой замороженный Trust Score.
     Возвращает число новых замороженных предсказаний."""
-    already = _frozen_keys(store)
+    already = _frozen_keys(store, agent_id)
     frozen = 0
     for f in forecasts:
         key = (f["event_id"], f["market_id"], f["prediction_id"])
         if key in already:
             continue
         obs_id = store.record_observation(
-            AGENT_ID, trust_score, trust_label, genome_hash=config_hash,
+            agent_id, trust_score, trust_label, genome_hash=config_hash,
             model_version=ENGINE_VERSION, source="prizolov-sports-ai/pre-kickoff", timestamp=now,
         )
         store.record_prediction(
@@ -171,28 +173,30 @@ class MatchResultVerifier:
         )
 
 
-def confirm_event(store, event_id: int, actual_selection: str, source_reference: str, now: datetime) -> int:
+def confirm_event(store, event_id: int, actual_selection: str, source_reference: str, now: datetime,
+                  agent_ids: Iterable[str] = (AGENT_ID,)) -> int:
     """Подтверждает все замороженные прогнозы матча. Уже подтверждённые
     пропускаются. Возвращает число записанных исходов Q4."""
     store.register_donor(**RESULTS_DONOR)
     verifier = MatchResultVerifier(event_id, actual_selection, source_reference, now)
     confirmed = 0
-    for p in store.get_predictions(AGENT_ID):
-        info = parse_task_version(p.snapshot.get("task_version"))
-        if info is None or info["event"] != event_id:
-            continue
-        if any(o.donor_id == RESULTS_DONOR["donor_id"] for o in p.outcomes):
-            continue
-        if record_external_outcome(store, p.id, verifier) is not None:
-            confirmed += 1
+    for agent_id in agent_ids:
+        for p in store.get_predictions(agent_id):
+            info = parse_task_version(p.snapshot.get("task_version"))
+            if info is None or info["event"] != event_id:
+                continue
+            if any(o.donor_id == RESULTS_DONOR["donor_id"] for o in p.outcomes):
+                continue
+            if record_external_outcome(store, p.id, verifier) is not None:
+                confirmed += 1
     return confirmed
 
 
-def evidence_summary(store) -> dict:
+def evidence_summary(store, agent_id: str = AGENT_ID) -> dict:
     """Сводка базы доказательств по прогнозирующему агенту: сколько
     прогнозов заморожено, сколько подтверждено исходом матча (Q4), сколько
     ждут результата, и когда были последняя заморозка и подтверждение."""
-    predictions = store.get_predictions(AGENT_ID)
+    predictions = store.get_predictions(agent_id)
     confirmations = [o for p in predictions for o in p.outcomes if o.donor_id == RESULTS_DONOR["donor_id"]]
     confirmed_ids = {p.id for p in predictions if any(o.donor_id == RESULTS_DONOR["donor_id"] for o in p.outcomes)}
     return {
@@ -210,14 +214,14 @@ def _round(value, digits=4):
     return None if value is None else round(float(value), digits)
 
 
-def q4_validation(store) -> dict:
+def q4_validation(store, agent_id: str = AGENT_ID) -> dict:
     """Проверка Q4: предсказывает ли Trust Score, замороженный до матча, что
     прогноз не сбудется. Только исходы Q4 (итоговый счёт из внешнего
     источника), только прогнозирующий агент. Это та же проверка, что
     `agenomics validate <база> --target task_failure --min-quality Q4`."""
     from agenomics import validate
 
-    report = validate(store, target=TARGET, agent_id=AGENT_ID, min_quality="Q4")
+    report = validate(store, target=TARGET, agent_id=agent_id, min_quality="Q4")
     h = report.holdout
     return {
         "verdict": report.verdict,
@@ -245,10 +249,10 @@ def q4_validation(store) -> dict:
     }
 
 
-def recent_confirmations(store, limit: int = 10) -> list:
+def recent_confirmations(store, limit: int = 10, agent_id: str = AGENT_ID) -> list:
     """Последние подтверждённые прогнозы: что было заморожено и что вышло."""
     rows = []
-    for p in store.get_predictions(AGENT_ID):
+    for p in store.get_predictions(agent_id):
         info = parse_task_version(p.snapshot.get("task_version")) or {}
         for o in p.outcomes:
             if o.donor_id == RESULTS_DONOR["donor_id"]:
@@ -280,6 +284,7 @@ def evidence_status(configured_path: str = "") -> dict:
         except Exception as exc:  # отчёт не должен ронять эндпоинт
             status["q4_validation"] = {"error": f"{type(exc).__name__}: {exc}"[:300]}
         status["recent_confirmations"] = recent_confirmations(store)
+        status["agents"] = _per_agent_status(store)
         try:
             from agenomics import accumulation_scorecard
             status["scorecard"] = {r.metric: {"current": r.current, "target": r.target}
@@ -290,6 +295,33 @@ def evidence_status(configured_path: str = "") -> dict:
     finally:
         store.close()
     return status
+
+
+def _per_agent_status(store) -> dict:
+    """Сводка по каждому стратегическому агенту: заморожено, подтверждено Q4,
+    средний Trust Score на момент заморозки и проверка Q4. Независимых матчей
+    меньше, чем строк: агенты оцениваются на одних и тех же матчах."""
+    from app.engine.strategy_agents import STRATEGY_AGENTS
+
+    result = {}
+    events_all = set()
+    for spec in STRATEGY_AGENTS:
+        item = {"theme": spec.theme, **evidence_summary(store, spec.agent_id)}
+        preds = store.get_predictions(spec.agent_id)
+        scores = [p.trust_score for p in preds]
+        item["trust_score_at_freeze"] = None if not scores else {
+            "min": min(scores), "mean": round(sum(scores) / len(scores), 2), "max": max(scores)}
+        for p in preds:
+            info = parse_task_version(p.snapshot.get("task_version"))
+            if info and any(o.donor_id == RESULTS_DONOR["donor_id"] for o in p.outcomes):
+                events_all.add(info["event"])
+        try:
+            item["q4_validation"] = q4_validation(store, spec.agent_id)
+        except Exception as exc:
+            item["q4_validation"] = {"error": f"{type(exc).__name__}: {exc}"[:300]}
+        result[spec.agent_id] = item
+    result["independent_confirmed_events"] = len(events_all)
+    return result
 
 
 def open_store(configured_path: str = ""):
@@ -307,7 +339,6 @@ def freeze_upcoming_forecasts(db, now: Optional[datetime] = None) -> int:
     матчи, которые начнутся в ближайшее окно (agenomics_freeze_window_minutes)."""
     from datetime import UTC, timedelta
 
-    from app.agenomics_integration import FORECAST_AGENT
     from app.core.config import settings
     from app.engine.predictor import SOURCE_WEIGHTS
     from app.models.event import Event
@@ -330,14 +361,28 @@ def freeze_upcoming_forecasts(db, now: Optional[datetime] = None) -> int:
     if store is None:
         return 0
     try:
-        trust = FORECAST_AGENT.score()  # до матча, только из прошлых исходов
-        forecasts = [
-            {"event_id": e.id, "market_id": p.market_id, "prediction_id": p.id,
-             "selection": p.selection, "probability": p.probability}
-            for p, e in rows
-        ]
-        return freeze_forecasts(store, forecasts, trust.score, trust.label,
-                                configuration_hash(SOURCE_WEIGHTS, settings.min_sources_for_prediction), now)
+        from app.agenomics_integration import FORECAST_AGENTS
+        from app.engine.strategy_agents import STRATEGY_AGENTS, probs_from_factors
+
+        weights_hash_args = (SOURCE_WEIGHTS, settings.min_sources_for_prediction)
+        total = 0
+        for spec in STRATEGY_AGENTS:
+            tracked = FORECAST_AGENTS.get(spec.agent_id)
+            if tracked is None:
+                continue
+            trust = tracked.score()  # до матча, только из прошлых исходов
+            forecasts = []
+            for p, e in rows:
+                selection, probability = spec.pick(probs_from_factors(p.factors))
+                if not selection or probability <= 0:
+                    continue
+                forecasts.append({"event_id": e.id, "market_id": p.market_id, "prediction_id": p.id,
+                                  "selection": selection, "probability": probability})
+            total += freeze_forecasts(
+                store, forecasts, trust.score, trust.label,
+                configuration_hash(*weights_hash_args, strategy=spec.theme if spec.agent_id != AGENT_ID else "consensus"),
+                now, agent_id=spec.agent_id)
+        return total
     finally:
         store.close()
 
@@ -353,6 +398,8 @@ def confirm_finished_event(event_id: int, actual_selection: str, source_referenc
     if store is None:
         return 0
     try:
-        return confirm_event(store, event_id, actual_selection, source_reference, datetime.now(tz=UTC))
+        from app.engine.strategy_agents import STRATEGY_AGENTS
+        return confirm_event(store, event_id, actual_selection, source_reference, datetime.now(tz=UTC),
+                             agent_ids=[a.agent_id for a in STRATEGY_AGENTS])
     finally:
         store.close()

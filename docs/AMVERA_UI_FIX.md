@@ -104,7 +104,7 @@ HEALTHCHECK ... localhost:8000/health
 Если видите **8000** и **appuser** — Amvera **не взяла** `Dockerfile` из GitHub.
 
 **Что сделать:**
-1. **Настройки → Git** — репозиторий `GIBDD-DPS/prizolov-sports-ai`, ветка **`main`**
+1. **Настройки → Git** — репозиторий `prizolov-lab/prizolov-sports-ai`, ветка **`main`**
 2. Отключить/удалить ручную загрузку архива в **Code**
 3. **Заморозить** проект ~20 сек (очистка Artifacts)
 4. **Пересобрать** и снова проверить лог
